@@ -4,26 +4,18 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from fpdf import FPDF
 from datetime import date
-import csv
-import io
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import re
 import os
 import json
 
+# Variables seguras
 TOKEN = os.getenv('BOT_TOKEN')
 if not TOKEN:
-    raise ValueError("BOT_TOKEN required")
+    print("❌ BOT_TOKEN requerido!")
+    exit(1)
 
-# Variables de entorno
-SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-
-GOOGLE_CREDS = json.loads(os.getenv('GOOGLE_CREDS', '{}'))
-if GOOGLE_CREDS:
-    with open('temp_creds.json', 'w') as f:
-        json.dump(GOOGLE_CREDS, f)
-    CREDS_FILE = 'temp_creds.json'
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_db():
     conn = sqlite3.connect('boletas.db')
@@ -35,73 +27,49 @@ def get_db():
     conn.commit()
     return conn, c
 
-def connect_sheets():
-    try:
-        import gspread
-        from google.oauth2 import service_account
-        creds = service_account.Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPE)
-        client = gspread.authorize(creds)
-        return client.open("Boletapp Rechnungen").sheet1
-    except:
-        print("Sheets no disponible, solo SQLite")
-        return None
-
-logging.basicConfig(level=logging.INFO)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hallo! Kommandos:\n"
-        "/rechnung \"Max Mustermann\" Berlin \"Corte Hombre\" 25EUR"
-        "/liste → Letzte 10\n"
-        "/delete ID → Lösche\n"
-        "/export → CSV"
+        "🎉 Boletapp LIVE!\n\n"
+        "📄 /rechnung \"Kunde\" Ort \"Leistung\" Preis\n"
+        "📋 /liste\n"
+        "🗑️ /delete ID\n"
+        "💾 /export CSV"
     )
 
 async def rechnung(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = ' '.join(context.args).strip()
-    
     if not args:
-        await update.message.reply_text('Verwendung: /rechnung "Kunde" Ort "Leistung" Preis')
+        await update.message.reply_text('/rechnung "Max Mustermann" Berlin "Corte Hombre" 25EUR')
         return
     
     match = re.match(r'"([^"]+)"\s+([^"]+)\s+"([^"]+)"\s+(.+)', args)
     if not match:
-        await update.message.reply_text('❌ Format: /rechnung "Max Mustermann" Berlin "Corte Hombre" 25€')
+        await update.message.reply_text('❌ Formato: /rechnung "Kunde" Ort "Leistung" 25EUR')
         return
     
     kunde, ort, leistung, preis = match.groups()
     
-    # Genera PDF
     pdf_path = generiere_pdf(kunde, ort, leistung, preis)
     
-    # Guarda SQLite
+    # SQLite
     conn, c = get_db()
     heute = date.today().strftime("%d.%m.%Y")
     c.execute("INSERT INTO boletas (datum, kunde, ort, leistung, preis, pdf_datei, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-              (heute, kunde, ort, leistung, preis, pdf_path, "Aktiv"))
-    sqlite_id = c.lastrowid
+              (heute, kunde, ort, leistung, preis.replace('€', 'EUR'), pdf_path, "Aktiv"))
+    boleta_id = c.lastrowid
     conn.commit()
     conn.close()
     
-    # Guarda Sheets
-    try:
-        sheet = connect_sheets()
-        sheet_id = len(sheet.get_all_values())
-        sheet.append_row([sqlite_id, heute, kunde, ort, leistung, preis, pdf_path, "Aktiv"])
-        await update.message.reply_text(
-            f"✅ Rechnung {sqlite_id} erstellt!\n"
-            f"SQLite ID: {sqlite_id}\n"
-            f"Sheets ID: {sheet_id}\n"
-            f"Kunde: {kunde}"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"✅ SQLite OK, Sheets Fehler: {str(e)}")
+    await update.message.reply_text(
+        f"✅ Rechnung {boleta_id} erstellt!\n"
+        f"👤 {kunde}\n"
+        f"📍 {ort}\n"
+        f"💇 {leistung}\n"
+        f"💰 {preis}"
+    )
     
-    # Envía PDF
     with open(pdf_path, 'rb') as f:
-        await update.message.reply_document(f, filename=f"Rechnung-{sqlite_id}.pdf")
-
-# [Mantén las funciones liste, delete, export, generiere_pdf y main igual que antes]
+        await update.message.reply_document(f, filename=f"Rechnung-{boleta_id}.pdf")
 
 async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn, c = get_db()
@@ -113,23 +81,24 @@ async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Keine boletas.")
         return
     
-    text = "Letzte boletas:\n\n"
+    text = "📋 Letzte boletas:\n\n"
     for row in rows:
         text += f"ID {row[0]}: {row[1]} - {row[2]} ({row[3]})\n"
     await update.message.reply_text(text)
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Verwendung: /delete <ID>")
+        await update.message.reply_text("/delete <ID>")
         return
-    
-    boleta_id = int(context.args[0])
-    conn, c = get_db()
-    c.execute("UPDATE boletas SET status='Gelöscht' WHERE id=?", (boleta_id,))
-    if c.rowcount > 0:
-        await update.message.reply_text(f"✅ Boleta {boleta_id} gelöscht (SQLite).")
-    conn.commit()
-    conn.close()
+    try:
+        boleta_id = int(context.args[0])
+        conn, c = get_db()
+        c.execute("UPDATE boletas SET status='Gelöscht' WHERE id=?", (boleta_id,))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"✅ ID {boleta_id} gelöscht.")
+    except:
+        await update.message.reply_text("❌ Ungültige ID.")
 
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn, c = get_db()
@@ -137,6 +106,8 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = c.fetchall()
     conn.close()
     
+    import io
+    import csv
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["ID", "Datum", "Kunde", "Ort", "Leistung", "Preis", "PDF", "Status"])
@@ -144,36 +115,35 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     buf = io.BytesIO(output.getvalue().encode())
     buf.name = "boletas.csv"
-    await update.message.reply_document(buf, filename="boletas.csv")
+    await update.message.reply_document(buf)
 
 def generiere_pdf(kunde, ort, leistung, preis):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("Arial", 12)
     
     heute = date.today().strftime("%d.%m.%Y")
     
-    pdf.cell(200, 10, txt="RECHNUNG (Kleinunternehmer §19 UStG)", ln=1, align="C")
-    pdf.cell(200, 10, txt=f"Datum: {heute}", ln=1)
+    pdf.cell(200, 10, "RECHNUNG §19 UStG", 0, 1, "C")
+    pdf.cell(200, 10, f"Datum: {heute}", 0, 1)
     pdf.ln(10)
     
-    pdf.cell(100, 10, txt="Von:", ln=1)
-    pdf.cell(100, 10, txt="DEIN NAME / DEIN STUDIO", ln=1)
-    pdf.cell(100, 10, txt="DEINE ADRESSE", ln=1)
+    pdf.cell(100, 10, "Von:", 0, 1)
+    pdf.cell(100, 10, "DEIN NAME", 0, 1)
+    pdf.cell(100, 10, "DEINE ADRESSE", 0, 1)
     
     pdf.ln(5)
-    pdf.cell(100, 10, txt="An:", ln=1)
-    pdf.cell(100, 10, txt=f"{kunde}", ln=1)
-    pdf.cell(100, 10, txt=f"{ort}", ln=1)
+    pdf.cell(100, 10, "An:", 0, 1)
+    pdf.cell(100, 10, kunde, 0, 1)
+    pdf.cell(100, 10, ort, 0, 1)
     
     pdf.ln(10)
-    pdf.cell(80, 10, txt="Leistung:", ln=1)
-    pdf.cell(120, 10, txt=f"{leistung}", ln=1)
-    pdf.cell(80, 10, txt="Betrag:", ln=1)
-    pdf.cell(120, 10, txt=f"{preis.replace('€', 'EUR')}", ln=1)
+    pdf.cell(80, 10, "Leistung:", 0, 1)
+    pdf.cell(120, 10, leistung, 0, 1)
+    pdf.cell(80, 10, "Preis:", 0, 1)
+    pdf.cell(120, 10, preis.replace('€', 'EUR'), 0, 1)
     
-    pdf.ln(10)
-    pdf.cell(200, 10, txt="Keine Umsatzsteuer gem. § 19 UStG", ln=1, align="C")
+    pdf.cell(200, 10, "Keine USt gem. §19 UStG", 0, 1, "C")
     
     pdf_path = f"rechnung_{kunde.replace(' ', '_')}.pdf"
     pdf.output(pdf_path)
@@ -181,12 +151,6 @@ def generiere_pdf(kunde, ort, leistung, preis):
 
 def main():
     app = Application.builder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("rechnung", rechnung))
-    app.add_handler(CommandHandler("liste", liste))
-    app.add_handler(CommandHandler("delete", delete))
-    app.add_handler(CommandHandler("export", export))
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    app.add_handler(CommandHandler("rechnung
