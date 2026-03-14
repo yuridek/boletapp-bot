@@ -10,11 +10,18 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import re
 import os
+import json
 
-TOKEN = "8442237379:AAFSFx3YMDRAE2AD8tYwqXX7LnUd2g_Am64"
+TOKEN = os.getenv('BOT_TOKEN')
 
+# Variables de entorno
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-CREDS_FILE = 'credentials.json'
+GOOGLE_CREDS = json.loads(os.getenv('GOOGLE_CREDS', '{}'))
+
+if GOOGLE_CREDS:
+    with open('temp_creds.json', 'w') as f:
+        json.dump(GOOGLE_CREDS, f)
+    CREDS_FILE = 'temp_creds.json'
 
 def get_db():
     conn = sqlite3.connect('boletas.db')
