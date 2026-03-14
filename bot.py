@@ -13,11 +13,13 @@ import os
 import json
 
 TOKEN = os.getenv('BOT_TOKEN')
+if not TOKEN:
+    raise ValueError("BOT_TOKEN required")
 
 # Variables de entorno
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-GOOGLE_CREDS = json.loads(os.getenv('GOOGLE_CREDS', '{}'))
 
+GOOGLE_CREDS = json.loads(os.getenv('GOOGLE_CREDS', '{}'))
 if GOOGLE_CREDS:
     with open('temp_creds.json', 'w') as f:
         json.dump(GOOGLE_CREDS, f)
