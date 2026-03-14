@@ -1,0 +1,5 @@
+python-telegram-bot==20.7
+fpdf2
+gspread
+oauth2client
+pillow
