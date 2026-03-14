@@ -1,4 +1,4 @@
-python-telegram-bot==20.7
+python-telegram-bot==21.4
 fpdf2==1.28.6
 pillow==10.3.0
 gspread==5.12.0
