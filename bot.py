@@ -36,14 +36,15 @@ def get_db():
     return conn, c
 
 def connect_sheets():
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    import gspread
-    from google.auth.transport.requests import Request
-    
-    creds = service_account.Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPE)
-    client = gspread.authorize(creds)
-    return client.open("Boletapp Rechnungen").sheet1
+    try:
+        import gspread
+        from google.oauth2 import service_account
+        creds = service_account.Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPE)
+        client = gspread.authorize(creds)
+        return client.open("Boletapp Rechnungen").sheet1
+    except:
+        print("Sheets no disponible, solo SQLite")
+        return None
 
 logging.basicConfig(level=logging.INFO)
 
